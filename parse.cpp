@@ -24,6 +24,7 @@ struct bus_unit {
     int status;
     int waitTime;
     string bus_stop;
+    string bus_plate;
 };
 
 vector<bus_unit> busData;
@@ -39,10 +40,14 @@ void printBusUnitVector(vector<bus_unit> *in) {
     cout << "toal found: " << in->size() << endl;
     for (int i = 0; i<in->size(); i++) {
         temp = in->at(i);
-        if (temp.status != STATUS_WAITING)
+        if (temp.status == STATUS_NOBUS)
             cout << "status: " << temp.status << " name: " << temp.bus_stop << endl;
-        else
+        else if (temp.status == STATUS_ARRIVED)
+            cout << "status: " << temp.status << " name: " << temp.bus_stop << " bus: " << temp.bus_plate << endl;
+        else if (temp.status == STATUS_WAITING)
             cout << "status: " << temp.status << " name: " << temp.bus_stop << " wait: " << temp.waitTime << endl;
+        else
+            cout << "status: " << temp.status << " name: " << temp.bus_stop << endl;
     }
 }
 
@@ -116,6 +121,7 @@ int buildTable(vector<string> *in) {
             } else {
                 temp.status = STATUS_ARRIVED;
                 temp.bus_stop = in->at(i);
+                temp.bus_plate = in->at(i-1);
                 busData.push_back(temp);
             }
         } else {
@@ -146,6 +152,8 @@ int main(int argc, char* const argv[]) {
         int rs = buildTable(&DataArray);
 
         printBusUnitVector(&busData);
+
+        DataArray.clear();
     }
     return 0;
 }
