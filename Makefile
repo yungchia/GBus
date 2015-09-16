@@ -4,5 +4,5 @@ all: parser
 CFLAGS = -I/usr/include/mysql++ -I/usr/include/mysql -lmysqlpp -lmysqlclient
 CC = g++
 
-parser:
+parser: parse.cpp
 	$(CC) parse.cpp -o parser $(CFLAGS)
