@@ -181,6 +181,65 @@ int buildTable(vector<string> *in, vector<bus_unit> *out) {
     return 0;
 }
 
+int buildTable_v2(vector<string> *in, vector<bus_unit> *out) {
+    if (in->size() > 2) {
+        cerr << "file contains multi lines: " << in->size() << endl;
+    }
+    string line = in->at(0);
+    //cout << "target: " << line << endl;
+
+    vector<string> wordVector;
+    size_t prev = 0, pos;
+    while ((pos = line.find_first_of("{}:[]=,\"", prev)) != string::npos)
+    {
+        if (pos > prev)
+            wordVector.push_back(line.substr(prev, pos-prev));
+        prev = pos+1;
+    }
+    if (prev < line.length())
+        wordVector.push_back(line.substr(prev, string::npos));
+
+    for (int i=0;i<wordVector.size()-1;) {
+//        cout << wordVector.at(i) << endl;
+        string token = wordVector.at(i++);
+        if (!token.compare("Etas")) {
+//            cout << "found Etas" << endl;
+            while (!wordVector.at(i).compare("idx")) {
+                i++;
+                int index = 0;
+                std::istringstream (wordVector.at(i++)) >> index;
+                cout << index << " -> ";
+                string etas = wordVector.at(i++);
+                if (etas.compare("eta"))
+                    cerr << "format error" << endl;
+                int eta;
+                std::istringstream (wordVector.at(i)) >> eta;
+                cout << eta << endl;
+                if (i < wordVector.size()-1)
+                    i++;
+            }
+        } else if (!token.compare("Buses")) {
+//            cout << "found Buses" << endl;
+            while (!wordVector.at(i).compare("bn")) {
+                i++;
+                string plate = wordVector.at(i);
+                i = i+5;
+                string idx = wordVector.at(i++);
+                if (idx.compare("idx"))
+                    cerr << "format error" << endl;
+                int index = 0;
+                std::istringstream (wordVector.at(i)) >> index;
+                cout << plate << " is at index: " << index << endl;
+                //cout << i << " " << wordVector.size() << endl;
+                if (i < wordVector.size()-1)
+                    i++;
+            }
+        }
+    }
+
+    return 0;
+}
+
 int storeToDB(vector<bus_unit> *bus) {
     Connection con(false);
     int rs = con.connect("gbus", "localhost", "gbus", "gbus");
@@ -232,7 +291,6 @@ int main(int argc, char* const argv[]) {
 
     if (argc == 2) {
         ifstream myfile(argv[1]);
-        string inLine;
 
         if (!myfile) {
             cout << "Error opening output file" << endl;
@@ -244,13 +302,14 @@ int main(int argc, char* const argv[]) {
 
 //        printStringVector(&DataArray);
 
-        int rs = buildTable(&DataArray, &busData);
+        //int rs = buildTable(&DataArray, &busData);
+        int rs = buildTable_v2(&DataArray, &busData);
 
-        printBusUnitVector(&busData);
+//        printBusUnitVector(&busData);
 
         DataArray.clear();
 
-        rs = storeToDB(&busData);
+//        rs = storeToDB(&busData);
 
         busData.clear();
     }
