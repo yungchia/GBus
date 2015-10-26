@@ -1,5 +1,5 @@
 #!/bin/sh
-sleeptime=0.5
+sleeptime=0.3
 
 filename="bus.txt"
 exec < $filename

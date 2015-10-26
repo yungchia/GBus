@@ -202,9 +202,9 @@ int buildTable(vector<string> *in, vector<bus_unit> *out) {
 #endif
 
 int buildTable_v2(vector<string> *in, vector<bus_unit> *out) {
-    if (in->size() > 2) {
+/*    if (in->size() > 1) {
         cerr << "file contains multi lines: " << in->size() << endl;
-    }
+    }*/
     string line = in->at(0);
     //cout << "target: " << line << endl;
 
@@ -258,9 +258,18 @@ int buildTable_v2(vector<string> *in, vector<bus_unit> *out) {
                 bw.where = index;
                 v_buswhere.push_back(bw);
 //                cout << plate << " is at index: " << index << endl;
-                //cout << i << " " << wordVector.size() << endl;
-                if (i < wordVector.size()-1)
-                    i++;
+//                cout << i << " " << wordVector.size() << endl;
+//                if (i < wordVector.size()-1)
+//                    i++;
+                if (i >= wordVector.size()-1)
+                    break;
+                while (wordVector.at(++i).compare("bn")) {
+//                    cout << "gg:" << wordVector.at(i) << endl;
+//                    cout << i << endl;
+//                    i++;
+                    if (i >= wordVector.size()-1)
+                        break;
+                }
             }
         }
     }
@@ -361,6 +370,14 @@ int main(int argc, char* const argv[]) {
 
         copy(istream_iterator<string>(myfile), istream_iterator<string>(), back_inserter(DataArray));
         myfile.close();
+
+        if (DataArray.size() > 1) {
+            for (int i = 1;i<DataArray.size();i++) {
+                DataArray.at(0).append(" ");
+                DataArray.at(0).append(DataArray.at(i));
+            }
+        }
+//        cout << "after: ->" << DataArray.at(0) << "<-" << endl;
 
 //        printStringVector(&DataArray);
 
