@@ -16,7 +16,7 @@ do
         takes=$(($END_TIME - $START_TIME))
 #		echo "data/$busname/$d" >> test.txt
 #        echo $busname reading takes $takes ms
-        ./parser data/$busname/$d
+        ./parser -i data/$busname/$d
         END_TIME2=`echo $(($(date +%s%N)/1000000))`
         takes2=$(($END_TIME2 - $END_TIME))
 #        echo $busname parsing takes $takes ms
