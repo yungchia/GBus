@@ -1,7 +1,7 @@
 #include <unistd.h>
+#include <chrono>
 #include <iostream>
 using std::cout;
-using std::cerr;
 using std::endl;
 #include <fstream>
 using std::ifstream;
@@ -22,12 +22,14 @@ using mysqlpp::SimpleResult;
 using mysqlpp::Row;
 
 string key;
+string curtime;
 string busname;
 int date[5] = {0}; //month, day, hour, min, sec
 int total_bus;
 int total_stop;
 
 bool debug;
+bool recordtime;
 
 struct busstop_unit {
     int index;
@@ -38,13 +40,6 @@ struct bus_where {
     string plate;
     int where;
     bool in;
-};
-
-struct bus_unit {
-    int status;
-    int waitTime;
-    string bus_stop;
-    string bus_plate;
 };
 
 vector<busstop_unit> v_busstop;
@@ -71,21 +66,13 @@ int parseString(string in, string token, vector<string> *out) {
 }
 
 int buildTable_v2(vector<string> *in) {
+    auto t_start = std::chrono::high_resolution_clock::now();
     string line = in->at(0);
     if (debug) cout << "target: " << line << endl;
 
     vector<string> wordVector;
     parseString(line, "{}:[]=,\"", &wordVector);
-/*    size_t prev = 0, pos;
-    while ((pos = line.find_first_of("{}:[]=,\"", prev)) != string::npos)
-    {
-        if (pos > prev)
-            wordVector.push_back(line.substr(prev, pos-prev));
-        prev = pos+1;
-    }
-    if (prev < line.length())
-        wordVector.push_back(line.substr(prev, string::npos));
-*/
+
     for (int i=0;i<wordVector.size()-1;) {
         if (debug) cout << wordVector.at(i) << endl;
         string token = wordVector.at(i++);
@@ -99,7 +86,7 @@ int buildTable_v2(vector<string> *in) {
                 bu.index = index;
                 string etas = wordVector.at(i++);
                 if (etas.compare("eta"))
-                    cerr << "format error" << endl;
+                    cout << "format error" << endl;
                 int eta;
                 std::istringstream (wordVector.at(i)) >> eta;
                 if (debug) cout << eta << endl;
@@ -120,10 +107,10 @@ int buildTable_v2(vector<string> *in) {
                     bw.in = true;
                 } else if (!io.compare("o")) {
                     bw.in = false;
-                } else cerr << "format error" << endl;
+                } else cout << "format error" << endl;
                 string idx = wordVector.at(++i);
                 if (idx.compare("idx"))
-                    cerr << "format error" << endl;
+                    cout << "format error" << endl;
                 int index = 0;
                 std::istringstream (wordVector.at(++i)) >> index;
                 bw.where = index;
@@ -139,16 +126,62 @@ int buildTable_v2(vector<string> *in) {
         }
     }
 
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "buildtable takes: " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
     return 0;
 }
 
-StoreQueryResult selectFromDb(Query query, string tablename, vector<string> columns) {
+StoreQueryResult selectFromDb(Query query, string tablename, vector<string> keys, vector<string> keyvalues, vector<string> columns) {
+    auto t_start = std::chrono::high_resolution_clock::now();
+    StoreQueryResult res;
+    string select("SELECT ");
+    if (columns.size() > 0) {
+        for (int i=0;i<columns.size();i++) {
+            select.append(columns.at(i));
+            if (i!=columns.size()-1)
+                select.append(",");
+        }
+    } else
+        select.append("*");
+    select.append(" FROM ");
+    select.append(tablename);
+    if (keys.size() != 0 && keyvalues.size() != 0) {
+        select.append(" WHERE ");
+        for (int i=0;i<keys.size();i++) {
+            select.append(keys.at(i));
+            select.append("='");
+            select.append(keyvalues.at(i));
+            select.append("'");
+            if (i!=keys.size()-1)
+                select.append(" AND ");
+        }
+    }
+    if (debug) cout << "select: " << select << endl;
+    query << select;
+
+    try {
+        res = query.store();
+    } catch (const mysqlpp::BadQuery& er) {
+        cout << "Query error: " << er.what() << endl;
+    }catch (const mysqlpp::BadConversion& er) {
+        cout << "Conversion error: " << er.what() << endl;
+        cout << "retrieved data size: " << er.retrieved << ", actual size: " << er.actual_size << endl;
+    }catch (const mysqlpp::Exception& er) {
+        cout << "Error: " << er.what() << endl;
+    }
+
+    query.reset();
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "selectFromDb takes " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
+    return res;
 }
 
 int insertDataToDb(Query query, string tablename, vector<string> columns, vector<string> values) {
+    auto t_start = std::chrono::high_resolution_clock::now();
+    int ret = 0;
     if (columns.size() != values.size()) {
-        cerr << "columns.size() != values.size()" << endl;
-        return 0;
+        cout << "columns.size() != values.size()" << endl;
+        return ret;
     }
     string insert;
     insert.append("INSERT INTO ");
@@ -177,30 +210,83 @@ int insertDataToDb(Query query, string tablename, vector<string> columns, vector
 
     try {
         SimpleResult sr = query.execute();
-        if (debug) {
-            if (sr.rows()==0) {
-                cout << "error: " << query.error() << endl;
-            } else
-                cout << "rows = " << sr.rows() << " id = " << sr.insert_id() << " info: " << sr.info() << endl;
+        if (sr.rows()==0) {
+            cout << "error: " << query.error() << endl;
+        } else {
+            if (debug) cout << "rows = " << sr.rows() << " id = " << sr.insert_id() << " info: " << sr.info() << endl;
+            ret = 1;
         }
     } catch (const mysqlpp::BadQuery& er) {
-        cerr << "Query error: " << er.what() << endl;
+        cout << "Query error: " << er.what() << endl;
     }catch (const mysqlpp::BadConversion& er) {
-        cerr << "Conversion error: " << er.what() << endl;
-        cerr << "\tretrieved data size: " << er.retrieved << ", actual size: " << er.actual_size << endl;
+        cout << "Conversion error: " << er.what() << endl;
+        cout << "retrieved data size: " << er.retrieved << ", actual size: " << er.actual_size << endl;
     }catch (const mysqlpp::Exception& er) {
-        cerr << "Error: " << er.what() << endl;
+        cout << "Error: " << er.what() << endl;
     }
 
     query.reset();
-    return 0;
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "insertDataToDb takes " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
+    return ret;
 }
 
-int updateDataToDb(Query query, string tablename, string key, vector<string> columns, vector<string> values, bool simple) {
+int updateDataToDb(Query query, string tablename, string key, string keyvalue, vector<string> columns, vector<string> values) {
+    auto t_start = std::chrono::high_resolution_clock::now();
+    int ret = 0;
     string update;
+    update.append("UPDATE ");
+    update.append(tablename);
+    update.append(" SET ");
+
+    if (columns.size() != values.size()) {
+        cout << "updateDataToDb: size does not match: " << columns.size() << " vs " << values.size() << endl;
+        return ret;
+    }
+
+    for (int i=0;i<columns.size();i++) {
+        update.append(columns.at(i));
+        update.append("='");
+        update.append(values.at(i));
+        update.append("'");
+        if (i!=columns.size()-1)
+            update.append(",");
+    }
+
+    update.append(" WHERE ");
+    update.append(key);
+    update.append("='");
+    update.append(keyvalue);
+    update.append("'");
+
+    if (debug) cout << "update: " << update << endl;
+    query << update;
+
+    try {
+        SimpleResult sr = query.execute();
+        if (sr.rows()==0) {
+            cout << "error: " << query.error() << endl;
+        } else {
+            if (debug) cout << "rows = " << sr.rows() << " id = " << sr.insert_id() << " info: " << sr.info() << endl;
+            ret = 1;
+        }
+    } catch (const mysqlpp::BadQuery& er) {
+        cout << "Query error: " << er.what() << endl;
+    }catch (const mysqlpp::BadConversion& er) {
+        cout << "Conversion error: " << er.what() << endl;
+        cout << "retrieved data size: " << er.retrieved << ", actual size: " << er.actual_size << endl;
+    }catch (const mysqlpp::Exception& er) {
+        cout << "Error: " << er.what() << endl;
+    }
+
+    query.reset();
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "updateDataToDb takes " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
+    return ret;
 }
 
 int storeToDB() {
+    auto t_start = std::chrono::high_resolution_clock::now();
     Connection con(false);
     int rs = con.connect("gbus", "localhost", "gbus", "gbus");
     if (debug) cout << "connect to DB: rs = " << rs << endl;
@@ -211,6 +297,7 @@ int storeToDB() {
 
     vector<string> columns;
     vector<string> values;
+#if 0
     columns.push_back("bus_storetime");
     values.push_back(key);
     columns.push_back("month");
@@ -232,68 +319,299 @@ int storeToDB() {
         values.push_back(int2str(v_busstop[i-1].eta));
     }
 
-    for (int i=1;i<=total_bus;i++) {
-        string s("busstatus_");
-        s.append(int2str(i));
-        columns.push_back(s);
-        values.push_back(int2str(v_buswhere[i-1].where));
+    columns.push_back("total_bus");
+    values.push_back(int2str(total_bus));
 
-        s.clear();
-        s.append("busplate_");
-        s.append(int2str(i));
-        columns.push_back(s);
-        values.push_back(v_buswhere[i-1].plate);
+    if (total_bus > 0) {
+        for (int i=1;i<=total_bus;i++) {
+            string s("busstatus_");
+            s.append(int2str(i));
+            columns.push_back(s);
+            values.push_back(int2str(v_buswhere[i-1].where));
+
+            s.clear();
+            s.append("busplate_");
+            s.append(int2str(i));
+            columns.push_back(s);
+            values.push_back(v_buswhere[i-1].plate);
+        }
     }
 
     columns.push_back("bus_name");
     values.push_back(busname);
-
     insertDataToDb(query, "route", columns, values);
+#endif
     columns.clear();
     values.clear();
 
     // store to businfo
-    query.reset();
-    query << "SELECT bus_plate,complete FROM businfo";
-    StoreQueryResult res = query.store();
-    if (res && res.size() > 0) {
-        if(debug) cout << res.size() << endl;
-        Row row;
-        Row::size_type i;
-        for (i = 0; row = res.at(i); i++) {
-            cout << "a " << row.at(0) << " " << row.at(1) << endl;
-            if (i==res.size()-1) break;
-        }
-    } else {
-        // no found any record, just insert a new one
-        for (int i=0;i<v_buswhere.size();i++) {
-            if (v_buswhere.at(i).where == 0 && v_buswhere.at(i).in == true) {
-                // bus start at first stop
-                columns.push_back("busname");
-                columns.push_back("bus_plate");
-                columns.push_back("stoptime_1");
-                values.push_back(key);
-                values.push_back(v_buswhere.at(i).plate);
-                string s;
-                for (int i=0;i<5;i++) {
-                    s.append(int2str(date[i]));
+    vector<string> keys;
+    vector<string> keyvalues;
+    if (total_bus > 0){
+        for (int i=0;i<=total_bus-1;i++) {
+            string curbusplate(v_buswhere.at(i).plate);
+            int curbuswhere = v_buswhere.at(i).where;
+            int curbusin = v_buswhere.at(i).in;
+
+            if (curbuswhere==0) {
+                if (curbusin)  { // insert
+                    keys.push_back("bus_plate");
+                    keyvalues.push_back(curbusplate);
+                    keys.push_back("complete");
+                    keyvalues.push_back("0");
+                    keys.push_back("bus_name");
+                    keyvalues.push_back(busname);
+                    columns.push_back("bus_key");
+                    columns.push_back("stoptime_0");
+                    columns.push_back("started");
+                    StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                    columns.clear();
+                    keys.clear();
+                    keyvalues.clear();
+                    if (res.size()==0) {
+                        columns.push_back("bus_key");
+                        values.push_back(key);
+                        columns.push_back("bus_plate");
+                        values.push_back(curbusplate);
+                        columns.push_back("stoptime_0");
+                        values.push_back(curtime);
+                        columns.push_back("bus_name");
+                        values.push_back(busname);
+                        columns.push_back("totalstop");
+                        values.push_back(int2str(total_stop));
+                        if (!insertDataToDb(query, "businfo", columns, values))
+                            cout << "something wrong..." << endl;
+                        columns.clear();
+                        values.clear();
+                    }
+                } else { //update if started = 0, and set started = 1 after updated
+                    keys.push_back("bus_plate");
+                    keyvalues.push_back(curbusplate);
+                    keys.push_back("complete");
+                    keyvalues.push_back("0");
+                    keys.push_back("bus_name");
+                    keyvalues.push_back(busname);
+                    columns.push_back("bus_key");
+                    columns.push_back("stoptime_0");
+                    columns.push_back("started");
+                    StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                    columns.clear();
+                    keys.clear();
+                    keyvalues.clear();
+                    if (res.size()==0) {
+                        if (debug) cout << "insert bus data since not found" << endl;
+                        columns.push_back("bus_key");
+                        values.push_back(key);
+                        columns.push_back("bus_plate");
+                        values.push_back(curbusplate);
+                        columns.push_back("stoptime_0");
+                        values.push_back(curtime);
+                        columns.push_back("bus_name");
+                        values.push_back(busname);
+                        columns.push_back("totalstop");
+                        values.push_back(int2str(total_stop));
+                        columns.push_back("started");
+                        values.push_back("1");
+                        if (!insertDataToDb(query, "businfo", columns, values))
+                            cout << "something wrong..." << endl;
+                        columns.clear();
+                        values.clear();
+                    } else if (res.size()==1) {
+                        Row row = res.at(0);
+                        if (!row.at(2).compare("0")) {
+                            columns.push_back("started");
+                            values.push_back("1");
+                            columns.push_back("stoptime_0");
+                            values.push_back(curtime);
+                            updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
+                            columns.clear();
+                            values.clear();
+                        }
+                    } else {
+                        cout << "something wrong... more than 1 bus is not complete with same plate" <<endl;
+                    }
                 }
-                values.push_back(s);
-                insertDataToDb(query, "businfo", columns, values);
+/*            } else if (curbuswhere==1) {
+                keys.push_back("bus_plate");
+                keyvalues.push_back(curbusplate);
+                keys.push_back("complete");
+                keyvalues.push_back("0");
+                keys.push_back("bus_name");
+                keyvalues.push_back(busname);
+                columns.push_back("bus_key");
+                columns.push_back("stoptime_0");
+                columns.push_back("started");
+                StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                columns.clear();
+                keys.clear();
+                keyvalues.clear();
+                if (res.size()==0) {
+                    if (debug) cout << "insert bus data since not found" << endl;
+                    columns.push_back("bus_key");
+                    values.push_back(key);
+                    columns.push_back("bus_plate");
+                    values.push_back(curbusplate);
+                    columns.push_back("stoptime_0");
+                    values.push_back(curtime);
+                    columns.push_back("stoptime_1");
+                    values.push_back(curtime);
+                    columns.push_back("bus_name");
+                    values.push_back(busname);
+                    columns.push_back("totalstop");
+                    values.push_back(int2str(total_stop));
+                    columns.push_back("started");
+                    values.push_back("1");
+                    if (!insertDataToDb(query, "businfo", columns, values))
+                        cout << "something wrong..." << endl;
+                    columns.clear();
+                    values.clear();
+                }*/
+            } else if (curbuswhere==total_stop-1) {
+                if (curbusin) { // update where and set complete = 1 if complete != 1
+                    keys.push_back("bus_plate");
+                    keyvalues.push_back(curbusplate);
+                    keys.push_back("bus_name");
+                    keyvalues.push_back(busname);
+                    columns.push_back("bus_key");
+                    string s("stoptime_");
+                    s.append(int2str(curbuswhere));
+                    columns.push_back(s);
+                    columns.push_back("complete");
+                    StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                    columns.clear();
+                    keys.clear();
+                    keyvalues.clear();
+                    if (res.size()==1) {
+                        Row row = res.at(0);
+                        if (row.at(2).compare("1")) {
+                            columns.push_back(s);
+                            values.push_back(curtime);
+                            columns.push_back("complete");
+                            values.push_back("1");
+                            updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
+                            columns.clear();
+                            values.clear();
+                        }
+                    } else {
+                        cout << "something wrong... found 0 or 2+ buses to complete " << res.size() << endl;
+                    }
+                } else { // X
+                    cout << "something wrong... total_stop is wrong? " << curbuswhere << " vs " << total_stop << endl;
+                }
+            } else if (curbuswhere==total_stop-2) {
+                if (curbusin) { // update where
+                    keys.push_back("bus_plate");
+                    keyvalues.push_back(curbusplate);
+                    keys.push_back("complete");
+                    keyvalues.push_back("0");
+                    keys.push_back("bus_name");
+                    keyvalues.push_back(busname);
+                    columns.push_back("bus_key");
+                    string s("stoptime_");
+                    s.append(int2str(curbuswhere));
+                    columns.push_back(s);
+                    StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                    columns.clear();
+                    keys.clear();
+                    keyvalues.clear();
+                    if (res.size()==1) {
+                        Row row = res.at(0);
+                        if (!row.at(1).compare("NULL")) {
+                            columns.push_back(s);
+                            values.push_back(curtime);
+                            updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
+                            columns.clear();
+                            values.clear();
+                        }
+                    } else {
+                        cout << "something wrong... found 0 or 2+ buses to complete " << res.size() << endl;
+                    }
+                } else { //update complete = 2, and where with stoptime = cur + eta
+                    keys.push_back("bus_plate");
+                    keyvalues.push_back(curbusplate);
+                    keys.push_back("complete");
+                    keyvalues.push_back("0");
+                    keys.push_back("bus_name");
+                    keyvalues.push_back(busname);
+                    columns.push_back("bus_key");
+                    string s("stoptime_");
+                    s.append(int2str(curbuswhere));
+                    columns.push_back(s);
+                    StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                    columns.clear();
+                    keys.clear();
+                    keyvalues.clear();
+                    if (res.size()==1) {
+                        Row row = res.at(0);
+                        if (!row.at(1).compare("NULL")) {
+                            int nextwhere = curbuswhere+1;
+                            s.clear();
+                            s.append("stoptime_");
+                            s.append(int2str(nextwhere));
+                            columns.push_back(s);
+                            string nexttime = curtime;
+                            int eta = v_busstop[nextwhere].eta;
+                            values.push_back(nexttime);
+                            columns.push_back("complete");
+                            values.push_back("2");
+                            updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
+                            columns.clear();
+                            values.clear();
+                        }
+                    } else {
+                        cout << "something wrong... found 0 or 2+ buses to complete " << res.size() << endl;
+                    }
+                }
+            } else {
+                keys.push_back("bus_plate");
+                keyvalues.push_back(curbusplate);
+                keys.push_back("complete");
+                keyvalues.push_back("0");
+                keys.push_back("bus_name");
+                keyvalues.push_back(busname);
+                columns.push_back("bus_key");
+                string s("stoptime_");
+                s.append(int2str(curbuswhere));
+                columns.push_back(s);
+                columns.push_back("started");
+                StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
+                columns.clear();
+                keys.clear();
+                keyvalues.clear();
+                if (res.size()==1) {
+                    Row row = res.at(0);
+                    if (!row.at(1).compare("NULL")) {
+                        columns.push_back(s);
+                        values.push_back(curtime);
+                        if (!row.at(2).compare("0")) {
+                            columns.push_back("started");
+                            values.push_back("1");
+                        }
+                        updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
+                        columns.clear();
+                        values.clear();
+                    }
+                } else {
+                    cout << "something wrong... found 0 or 2+ buses to complete " << res.size() << endl;
+                }
             }
         }
     }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "storeToDb takes: " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
     return 0;
 }
 
 int main(int argc, char* argv[]) {
-    vector<string> DataArray;
+    auto t_start = std::chrono::high_resolution_clock::now();
     debug = false;
+    recordtime = false;
     int opt;
     string filename;
     bool notStoreToDB = false;
 
-    while ((opt = getopt(argc, argv, "i:db")) != -1) {
+    while ((opt = getopt(argc, argv, "i:dbt")) != -1) {
         switch (opt) {
             case 'i':
                 filename = optarg;
@@ -304,12 +622,16 @@ int main(int argc, char* argv[]) {
             case 'b':
                 notStoreToDB = true;
                 break;
+            case 't':
+                recordtime = true;
+                break;
             default:
                 cout << "unknown option" << endl;
         }
     }
 
     if (filename.length() != 0) {
+        vector<string> DataArray;
         ifstream myfile(filename.c_str());
 
         if (!myfile) {
@@ -320,8 +642,13 @@ int main(int argc, char* argv[]) {
         copy(istream_iterator<string>(myfile), istream_iterator<string>(), back_inserter(DataArray));
         myfile.close();
 
+        if (DataArray.size() == 0) {
+            cout << "file size is 0" << endl;
+            return -1;
+        }
+
         vector<string> wordVector;
-        parseString(filename, "_/.-", &wordVector);
+        parseString(filename, "_/", &wordVector);
 
         busname = wordVector.at(1);
         key.append(busname);
@@ -329,7 +656,12 @@ int main(int argc, char* argv[]) {
         for (int i=2;i<wordVector.size();i++){
             key.append("-");
             date[i-2] = (wordVector.at(i)[0] - '0')*10 + (wordVector.at(i)[1] - '0');
+            if (date[i-2] < 10) {
+                key.append("0");
+                curtime.append("0");
+            }
             key.append(int2str(date[i-2]));
+            curtime.append(int2str(date[i-2]));
         }
 
         wordVector.clear();
@@ -356,5 +688,7 @@ int main(int argc, char* argv[]) {
 
         DataArray.clear();
     }
+    auto t_end = std::chrono::high_resolution_clock::now();
+    if (recordtime) cout << "total takes: " << std::chrono::duration<double, std::milli>(t_end-t_start).count() << " ms" << endl;
     return 0;
 }
