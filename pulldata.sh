@@ -1,18 +1,17 @@
 #!/bin/sh
 sleeptime=0
 
-filename="bus.txt"
+#filename="bus.txt"
 
-while read filename2
-do
+#while read filename2
+#do
     while read busname url
     do
 #        echo $busname
 #        echo $url
         d=`date +%m_%d_%H_%M_%S`
         START_TIME=`echo $(($(date +%s%N)/1000000))`
-        #curl "$url" -o "data/$busname/$d" --create-dirs -# -s -m 1 --retry 1
-        #wget -O "data/$busname/$d" "$url" --wait=0.1 --tries=5 --read-timeout=0.3 -q
+        #curl --create-dirs -# -s -m0.3 "$url" -o "data/$busname/$d"
         wget -T 0.2 --tries=1 --wait=0.1 -O "data/$busname/$d" "$url" -q
         END_TIME=`echo $(($(date +%s%N)/1000000))`
         takes=$(($END_TIME - $START_TIME))
@@ -30,8 +29,8 @@ do
         totaltimep=$(($totaltimep + $takes2))
         sleep $sleeptime
         echo "====================================================="
-    done <$filename2
-done <$filename
+    done <$1
+#done <$1
 
 echo "total takes:" $totaltime $totaltimer "+" $totaltimep
 echo $total

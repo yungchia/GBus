@@ -1,7 +1,10 @@
 all: parser
 #target = parser
 
-CFLAGS = -I/usr/include/mysql++ -I/usr/include/mysql -lmysqlpp -lmysqlclient -O3 -std=c++11 -Werror
+CFLAGS = -I/usr/include/mysql++ -I/usr/include/mysql -lmysqlpp -lmysqlclient
+CFLAGS += -std=c++11
+CFLAGS += -Werror
+CFLAGS += -O3
 CC = g++
 
 parser: parse.cpp

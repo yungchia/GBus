@@ -40,6 +40,7 @@ struct bus_where {
     string plate;
     int where;
     bool in;
+    string dbkey;
 };
 
 vector<busstop_unit> v_busstop;
@@ -51,6 +52,17 @@ string int2str(int &i) {
     ss << i;
 
     return ss.str();
+}
+
+int str2int(string s) {
+    int i = 0;
+    for (int j = s.size()-1; j>=0 ; j--) {
+        if (j==0)
+            i += s.at(j)-'0';
+        else
+            i += j*10*(s.at(j)-'0');
+    }
+    return i;
 }
 
 int parseString(string in, string token, vector<string> *out) {
@@ -98,6 +110,8 @@ int buildTable_v2(vector<string> *in) {
         } else if (!token.compare("Buses")) {
             while (!wordVector.at(i).compare("bn")) {
                 i++;
+                if (i+7>=wordVector.size())
+                    break;
                 bus_where bw;
                 string plate = wordVector.at(i);
                 bw.plate = plate;
@@ -114,6 +128,10 @@ int buildTable_v2(vector<string> *in) {
                 int index = 0;
                 std::istringstream (wordVector.at(++i)) >> index;
                 bw.where = index;
+                string dbkey(key);
+                dbkey.append("-");
+                dbkey.append(plate);
+                bw.dbkey = dbkey;
                 if (debug) cout << bw.plate << (bw.in ? " is just at index: " : " is leaving index ") << index << endl;
                 v_buswhere.push_back(bw);
                 if (i >= wordVector.size()-1)
@@ -352,6 +370,7 @@ int storeToDB() {
             string curbusplate(v_buswhere.at(i).plate);
             int curbuswhere = v_buswhere.at(i).where;
             int curbusin = v_buswhere.at(i).in;
+            string dbkey = v_buswhere.at(i).dbkey;
 
             if (curbuswhere==0) {
                 if (curbusin)  { // insert
@@ -370,7 +389,7 @@ int storeToDB() {
                     keyvalues.clear();
                     if (res.size()==0) {
                         columns.push_back("bus_key");
-                        values.push_back(key);
+                        values.push_back(dbkey);
                         columns.push_back("bus_plate");
                         values.push_back(curbusplate);
                         columns.push_back("stoptime_0");
@@ -379,6 +398,8 @@ int storeToDB() {
                         values.push_back(busname);
                         columns.push_back("totalstop");
                         values.push_back(int2str(total_stop));
+                        columns.push_back("updatestop");
+                        values.push_back(int2str(curbuswhere));
                         if (!insertDataToDb(query, "businfo", columns, values))
                             cout << "something wrong..." << endl;
                         columns.clear();
@@ -401,7 +422,7 @@ int storeToDB() {
                     if (res.size()==0) {
                         if (debug) cout << "insert bus data since not found" << endl;
                         columns.push_back("bus_key");
-                        values.push_back(key);
+                        values.push_back(dbkey);
                         columns.push_back("bus_plate");
                         values.push_back(curbusplate);
                         columns.push_back("stoptime_0");
@@ -411,7 +432,9 @@ int storeToDB() {
                         columns.push_back("totalstop");
                         values.push_back(int2str(total_stop));
                         columns.push_back("started");
-                        values.push_back("1");
+                        values.push_back("2");
+                        columns.push_back("updatestop");
+                        values.push_back(int2str(curbuswhere));
                         if (!insertDataToDb(query, "businfo", columns, values))
                             cout << "something wrong..." << endl;
                         columns.clear();
@@ -423,6 +446,8 @@ int storeToDB() {
                             values.push_back("1");
                             columns.push_back("stoptime_0");
                             values.push_back(curtime);
+                            columns.push_back("updatestop");
+                            values.push_back(int2str(curbuswhere));
                             updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
                             columns.clear();
                             values.clear();
@@ -431,41 +456,6 @@ int storeToDB() {
                         cout << "something wrong... more than 1 bus is not complete with same plate" <<endl;
                     }
                 }
-/*            } else if (curbuswhere==1) {
-                keys.push_back("bus_plate");
-                keyvalues.push_back(curbusplate);
-                keys.push_back("complete");
-                keyvalues.push_back("0");
-                keys.push_back("bus_name");
-                keyvalues.push_back(busname);
-                columns.push_back("bus_key");
-                columns.push_back("stoptime_0");
-                columns.push_back("started");
-                StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
-                columns.clear();
-                keys.clear();
-                keyvalues.clear();
-                if (res.size()==0) {
-                    if (debug) cout << "insert bus data since not found" << endl;
-                    columns.push_back("bus_key");
-                    values.push_back(key);
-                    columns.push_back("bus_plate");
-                    values.push_back(curbusplate);
-                    columns.push_back("stoptime_0");
-                    values.push_back(curtime);
-                    columns.push_back("stoptime_1");
-                    values.push_back(curtime);
-                    columns.push_back("bus_name");
-                    values.push_back(busname);
-                    columns.push_back("totalstop");
-                    values.push_back(int2str(total_stop));
-                    columns.push_back("started");
-                    values.push_back("1");
-                    if (!insertDataToDb(query, "businfo", columns, values))
-                        cout << "something wrong..." << endl;
-                    columns.clear();
-                    values.clear();
-                }*/
             } else if (curbuswhere==total_stop-1) {
                 if (curbusin) { // update where and set complete = 1 if complete != 1
                     keys.push_back("bus_plate");
@@ -483,11 +473,13 @@ int storeToDB() {
                     keyvalues.clear();
                     if (res.size()==1) {
                         Row row = res.at(0);
-                        if (row.at(2).compare("1")) {
+                        if (row.at(2).compare("1")) { //complete
                             columns.push_back(s);
                             values.push_back(curtime);
                             columns.push_back("complete");
                             values.push_back("1");
+                            columns.push_back("updatestop");
+                            values.push_back(int2str(curbuswhere));
                             updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
                             columns.clear();
                             values.clear();
@@ -519,6 +511,8 @@ int storeToDB() {
                         if (!row.at(1).compare("NULL")) {
                             columns.push_back(s);
                             values.push_back(curtime);
+                            columns.push_back("updatestop");
+                            values.push_back(int2str(curbuswhere));
                             updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
                             columns.clear();
                             values.clear();
@@ -554,6 +548,8 @@ int storeToDB() {
                             values.push_back(nexttime);
                             columns.push_back("complete");
                             values.push_back("2");
+                            columns.push_back("updatestop");
+                            values.push_back(int2str(curbuswhere));
                             updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
                             columns.clear();
                             values.clear();
@@ -574,25 +570,60 @@ int storeToDB() {
                 s.append(int2str(curbuswhere));
                 columns.push_back(s);
                 columns.push_back("started");
+                columns.push_back("updatestop");
                 StoreQueryResult res = selectFromDb(query, "businfo", keys, keyvalues, columns);
                 columns.clear();
                 keys.clear();
                 keyvalues.clear();
                 if (res.size()==1) {
                     Row row = res.at(0);
-                    if (!row.at(1).compare("NULL")) {
+                    if (!row.at(1).compare("NULL")) { //stoptime
+                        int busupdate = str2int((string)row.at(3));
+                        if ((curbuswhere - busupdate) > 1) {  // update empty busstop time
+                            if (debug) cout << "updatebus = " << row.at(3) << " curbuswhere = " << curbuswhere << endl;
+                            cout << "should update empty busstop time" << endl;
+                        }
                         columns.push_back(s);
                         values.push_back(curtime);
-                        if (!row.at(2).compare("0")) {
+                        if (!row.at(2).compare("0")) { //started
                             columns.push_back("started");
-                            values.push_back("1");
+                            values.push_back("3");
                         }
+                        columns.push_back("updatestop");
+                        values.push_back(int2str(curbuswhere));
                         updateDataToDb(query, "businfo", "bus_key", row.at(0).c_str(), columns, values);
                         columns.clear();
                         values.clear();
                     }
+                } else if (res.size()==0) {
+                    if (curbuswhere<=2) {
+                        if (debug) cout << "insert bus data since not found condition 2" << endl;
+                        columns.push_back("bus_key");
+                        values.push_back(dbkey);
+                        columns.push_back("bus_plate");
+                        values.push_back(curbusplate);
+                        for (int j=0;j<=curbuswhere;j++) {
+                            s.clear();
+                            s.append("stoptime_");
+                            s.append(int2str(j));
+                            columns.push_back(s);
+                            values.push_back(curtime);
+                        }
+                        columns.push_back("bus_name");
+                        values.push_back(busname);
+                        columns.push_back("totalstop");
+                        values.push_back(int2str(total_stop));
+                        columns.push_back("started");
+                        values.push_back("2");
+                        columns.push_back("updatestop");
+                        values.push_back(int2str(curbuswhere));
+                        if (!insertDataToDb(query, "businfo", columns, values))
+                            cout << "something wrong..." << endl;
+                        columns.clear();
+                        values.clear();
+                    }
                 } else {
-                    cout << "something wrong... found 0 or 2+ buses to complete " << res.size() << endl;
+                    cout << "something wrong... found 2+ buses to complete " << res.size() << endl;
                 }
             }
         }
@@ -682,7 +713,7 @@ int main(int argc, char* argv[]) {
         total_stop = v_busstop.size();
         total_bus = v_buswhere.size();
 
-        if (!notStoreToDB) {
+        if (!notStoreToDB && total_bus) {
             rs = storeToDB();
         }
 
